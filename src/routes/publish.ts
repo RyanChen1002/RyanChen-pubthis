@@ -98,7 +98,13 @@ publishRoute.post("/publish", async (c) => {
     ...(isPinned && { pinned: true }),
   };
 
-  await writeArtifact(artifactId, contentBuffer, meta);
+  let userId = c.req.header("PUBTHIS_USER") || null;
+  if (!userId) {
+     const auth = c.req.header("Authorization");
+     if (auth && auth.startsWith("Bearer ")) userId = auth.split(" ")[1];
+  }
+
+  await writeArtifact(artifactId, contentBuffer, meta, userId ?? undefined);
 
   log.info(
     { artifact_id: artifactId, content_type: contentType, size_bytes: contentBuffer.length, ttl_seconds: ttl },

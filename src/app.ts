@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { publishRoute } from "./routes/publish.js";
 import { serveRoute } from "./routes/serve.js";
+import { authRoute } from "./routes/auth.js";
+import { uiRoute } from "./routes/ui.js";
 import { rateLimiter } from "./middleware/rate-limit.js";
 import { getDiskStatus } from "./health.js";
 
@@ -16,11 +18,7 @@ function isBrowser(accept: string): boolean {
 export function createApp(): Hono {
   const app = new Hono();
 
-  app.get("/", async (c) => {
-    if (isBrowser(c.req.header("Accept") || "")) {
-      return c.redirect(WEBSITE_URL, 302);
-    }
-
+  app.get("/disk", async (c) => {
     try {
       const disk = await getDiskStatus();
       return c.json({ status: "ok", disk });
@@ -83,20 +81,14 @@ export function createApp(): Hono {
     );
   });
 
-  // Redirect non-API browser requests (e.g. /docs) to the website
-  app.use("*", async (c, next) => {
-    const path = c.req.path;
-    const isApiPath = API_PREFIXES.some((p) => path.startsWith(p));
-    if (!isApiPath && path !== "/" && isBrowser(c.req.header("Accept") || "")) {
-      return c.redirect(`${WEBSITE_URL}${path}`, 302);
-    }
-    return next();
-  });
+  // Removed redirect since we have our own UI now
 
   app.use("/v1/*", rateLimiter());
 
   app.route("/v1", publishRoute);
   app.route("/a", serveRoute);
+  app.route("/api/auth", authRoute);
+  app.route("/", uiRoute);
 
   return app;
 }
