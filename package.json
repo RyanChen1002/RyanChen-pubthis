@@ -15,6 +15,7 @@
   "dependencies": {
     "@hono/node-server": "^1.19.9",
     "@openpanel/sdk": "^1.0.4",
+    "@supabase/supabase-js": "^2.117.2",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^13.0.3",
     "hono": "^4.13.7",

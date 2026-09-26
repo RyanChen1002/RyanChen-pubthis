@@ -3,6 +3,7 @@ import { publishRoute } from "./routes/publish.js";
 import { serveRoute } from "./routes/serve.js";
 import { authRoute } from "./routes/auth.js";
 import { uiRoute } from "./routes/ui.js";
+import { apiKeysRoute } from "./routes/apikeys.js";
 import { rateLimiter } from "./middleware/rate-limit.js";
 import { getDiskStatus } from "./health.js";
 
@@ -88,6 +89,7 @@ export function createApp(): Hono {
   app.route("/v1", publishRoute);
   app.route("/a", serveRoute);
   app.route("/api/auth", authRoute);
+  app.route("/", apiKeysRoute);
   app.route("/", uiRoute);
 
   return app;

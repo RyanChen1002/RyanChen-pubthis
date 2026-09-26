@@ -6,6 +6,7 @@ import { log } from "../logger.js";
 import { writeArtifact } from "../storage.js";
 import { extractOgMeta } from "../og.js";
 import { op } from "../analytics.js";
+import { getUserFromApiKey } from "./apikeys.js";
 import type { ArtifactMeta, PublishRequest, PublishResponse } from "../types.js";
 
 export const publishRoute = new Hono();
@@ -98,10 +99,21 @@ publishRoute.post("/publish", async (c) => {
     ...(isPinned && { pinned: true }),
   };
 
-  let userId = c.req.header("PUBTHIS_USER") || null;
+  // Resolve user: 1) Bearer API key (any AI model), 2) legacy PUBTHIS_USER header
+  let userId: string | null = null;
+  const authHeader = c.req.header("Authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    const bearerKey = authHeader.split(" ")[1];
+    // If it looks like an API key (pk_...) look it up; otherwise treat as raw user ID (legacy)
+    if (bearerKey.startsWith("pk_")) {
+      userId = await getUserFromApiKey(bearerKey);
+    } else {
+      userId = bearerKey;
+    }
+  }
+  // Legacy support: PUBTHIS_USER header
   if (!userId) {
-     const auth = c.req.header("Authorization");
-     if (auth && auth.startsWith("Bearer ")) userId = auth.split(" ")[1];
+    userId = c.req.header("PUBTHIS_USER") || null;
   }
 
   await writeArtifact(artifactId, contentBuffer, meta, userId ?? undefined);

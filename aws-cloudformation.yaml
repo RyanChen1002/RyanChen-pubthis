@@ -9,15 +9,80 @@ Parameters:
   YourIP:
     Type: String
     Default: '0.0.0.0/0'
-    Description: 'Your IP address for SSH access (e.g. 123.45.67.89/32). Use 0.0.0.0/0 to allow from anywhere (less secure).'
+    Description: 'Your IP address for SSH access (e.g. 123.45.67.89/32). Use 0.0.0.0/0 to allow from anywhere.'
+
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: '/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id'
+    Description: 'Auto-resolves the latest Ubuntu 22.04 AMI for your region'
 
 Resources:
 
-  # Security Group - The Firewall
+  # ---- NETWORKING ----
+
+  PubThisVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: '10.0.0.0/16'
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: pubthis-vpc
+
+  PubThisSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref PubThisVPC
+      CidrBlock: '10.0.1.0/24'
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: pubthis-subnet
+
+  PubThisInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: pubthis-igw
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref PubThisVPC
+      InternetGatewayId: !Ref PubThisInternetGateway
+
+  PubThisRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref PubThisVPC
+      Tags:
+        - Key: Name
+          Value: pubthis-rt
+
+  PubThisRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PubThisRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref PubThisInternetGateway
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PubThisSubnet
+      RouteTableId: !Ref PubThisRouteTable
+
+  # ---- SECURITY ----
+
   PubThisSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: 'Security group for PubThis server'
+      VpcId: !Ref PubThisVPC
       SecurityGroupIngress:
         # Allow HTTP (port 80) from anywhere
         - IpProtocol: tcp
@@ -29,12 +94,12 @@ Resources:
           FromPort: 443
           ToPort: 443
           CidrIp: '0.0.0.0/0'
-        # Allow SSH (port 22) only from your IP
+        # Allow SSH (port 22) from your IP
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
           CidrIp: !Ref YourIP
-        # Allow the app port (3000) from anywhere
+        # Allow app port (3000) from anywhere
         - IpProtocol: tcp
           FromPort: 3000
           ToPort: 3000
@@ -43,15 +108,21 @@ Resources:
         - Key: Name
           Value: pubthis-sg
 
-  # EC2 Instance - The Server
+  # ---- SERVER ----
+
   PubThisServer:
     Type: AWS::EC2::Instance
+    DependsOn: AttachGateway
     Properties:
-      InstanceType: t2.micro  # Free Tier eligible!
-      ImageId: !FindInMap [RegionAMI, !Ref 'AWS::Region', AMI]
+      InstanceType: t2.micro
+      ImageId: !Ref LatestAmiId
       KeyName: !Ref KeyPairName
-      SecurityGroups:
-        - !Ref PubThisSecurityGroup
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: '0'
+          SubnetId: !Ref PubThisSubnet
+          GroupSet:
+            - !Ref PubThisSecurityGroup
       Tags:
         - Key: Name
           Value: pubthis-server
@@ -59,37 +130,38 @@ Resources:
         Fn::Base64: !Sub |
           #!/bin/bash
           set -e
+          exec > /var/log/pubthis-setup.log 2>&1
 
           # Update system
-          sudo apt-get update -y
-          sudo apt-get upgrade -y
+          apt-get update -y
+          apt-get upgrade -y
 
           # Install Node.js 22 LTS
-          curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-          sudo apt-get install -y nodejs
+          curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+          apt-get install -y nodejs
 
           # Install Git
-          sudo apt-get install -y git
+          apt-get install -y git
 
-          # Install PM2 (keeps your app running forever, even after reboot)
-          sudo npm install -g pm2
+          # Install PM2 (keeps your app running forever)
+          npm install -g pm2
 
           # Clone YOUR repository
           cd /home/ubuntu
-          git clone https://github.com/RyanChen1002/RyanChen-pubthis.git
+          sudo -u ubuntu git clone https://github.com/RyanChen1002/RyanChen-pubthis.git
           cd RyanChen-pubthis
 
           # Install dependencies
-          npm install
+          sudo -u ubuntu npm install
 
-          # Start the app with PM2
-          pm2 start npm --name "pubthis" -- run start
-          pm2 save
-          pm2 startup systemd -u ubuntu --hp /home/ubuntu
+          # Start the app with PM2 as the ubuntu user
+          sudo -u ubuntu pm2 start npm --name "pubthis" -- run start
+          sudo -u ubuntu pm2 save
+          env PATH=$PATH:/usr/bin pm2 startup systemd -u ubuntu --hp /home/ubuntu
 
           # Install Nginx as a reverse proxy (maps port 80 -> 3000)
-          sudo apt-get install -y nginx
-          sudo tee /etc/nginx/sites-available/pubthis > /dev/null <<'EOF'
+          apt-get install -y nginx
+          cat > /etc/nginx/sites-available/pubthis <<'EOF'
           server {
               listen 80;
               server_name _;
@@ -107,38 +179,20 @@ Resources:
           }
           EOF
 
-          sudo ln -sf /etc/nginx/sites-available/pubthis /etc/nginx/sites-enabled/pubthis
-          sudo rm -f /etc/nginx/sites-enabled/default
-          sudo systemctl restart nginx
+          ln -sf /etc/nginx/sites-available/pubthis /etc/nginx/sites-enabled/pubthis
+          rm -f /etc/nginx/sites-enabled/default
+          systemctl restart nginx
 
-  # Elastic IP - Gives your server a permanent public IP address
+  # Elastic IP - Permanent public IP address
   PubThisElasticIP:
     Type: AWS::EC2::EIP
+    DependsOn: AttachGateway
     Properties:
+      Domain: vpc
       InstanceId: !Ref PubThisServer
       Tags:
         - Key: Name
           Value: pubthis-ip
-
-# AMI Map - Ubuntu 22.04 LTS images per region
-Mappings:
-  RegionAMI:
-    us-east-1:
-      AMI: ami-0c7217cdde317cfec
-    us-east-2:
-      AMI: ami-05fb0b8c1424f266b
-    us-west-1:
-      AMI: ami-0ce2cb35386fc22e9
-    us-west-2:
-      AMI: ami-008fe2fc65df48dac
-    eu-west-1:
-      AMI: ami-0905a3c97561e0b69
-    eu-central-1:
-      AMI: ami-0faab6bdbac9486fb
-    ap-southeast-1:
-      AMI: ami-078c1149d8ad719a7
-    ap-northeast-1:
-      AMI: ami-07c589821f2b353aa
 
 Outputs:
   PublicIP:

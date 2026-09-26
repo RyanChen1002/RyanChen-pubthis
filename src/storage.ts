@@ -1,8 +1,8 @@
-import { db } from "./db.js";
+import { supabase } from "./supabase.js";
 import type { ArtifactMeta } from "./types.js";
 
 export async function ensureDataDir(): Promise<void> {
-  // Directory creation is now handled in db.ts
+  // No-op: Supabase manages storage
 }
 
 export async function writeArtifact(
@@ -11,44 +11,62 @@ export async function writeArtifact(
   meta: ArtifactMeta,
   userId?: string
 ): Promise<void> {
-  // Store both the artifact and the meta tightly coupled in the table
-  db.prepare(`
-    INSERT INTO artifacts (id, user_id, content, content_type, expires_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(
-    id, 
-    userId || null, 
-    content, 
-    meta.content_type, 
-    meta.expires_at || null
-  );
+  const isBinary = meta.content_type.startsWith("image/") ||
+    ["application/pdf", "application/octet-stream"].includes(meta.content_type);
+
+  const contentStr = isBinary
+    ? content.toString("base64")
+    : content.toString("utf-8");
+
+  const { error } = await supabase.from("artifacts").insert({
+    id,
+    user_id: userId || null,
+    content: contentStr,
+    content_type: meta.content_type,
+    is_binary: isBinary,
+    expires_at: meta.expires_at || null,
+    og_title: meta.og_title || null,
+    og_description: meta.og_description || null,
+  });
+
+  if (error) throw new Error(`Failed to write artifact: ${error.message}`);
 }
 
-export async function readMetadata(
-  id: string,
-): Promise<ArtifactMeta | null> {
-  const row = db.prepare("SELECT content_type, expires_at FROM artifacts WHERE id = ?").get(id) as any;
+export async function readMetadata(id: string): Promise<ArtifactMeta | null> {
+  const { data: row } = await supabase
+    .from("artifacts")
+    .select("content_type, expires_at")
+    .eq("id", id)
+    .single();
+
   if (!row) return null;
   return {
     content_type: row.content_type,
     expires_at: row.expires_at,
     artifact_id: id,
-    created_at: '',
-    size_bytes: 0
+    created_at: "",
+    size_bytes: 0,
   };
 }
 
 export async function readArtifact(id: string): Promise<Buffer | null> {
-  const row = db.prepare("SELECT content FROM artifacts WHERE id = ?").get(id) as any;
+  const { data: row } = await supabase
+    .from("artifacts")
+    .select("content, is_binary")
+    .eq("id", id)
+    .single();
+
   if (!row) return null;
-  return row.content;
+  return row.is_binary
+    ? Buffer.from(row.content, "base64")
+    : Buffer.from(row.content, "utf-8");
 }
 
 export async function deleteArtifact(id: string): Promise<void> {
-  db.prepare("DELETE FROM artifacts WHERE id = ?").run(id);
+  await supabase.from("artifacts").delete().eq("id", id);
 }
 
 export async function listArtifactIds(): Promise<string[]> {
-  const rows = db.prepare("SELECT id FROM artifacts").all() as { id: string }[];
-  return rows.map(r => r.id);
+  const { data: rows } = await supabase.from("artifacts").select("id");
+  return (rows || []).map((r: any) => r.id);
 }
