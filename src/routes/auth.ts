@@ -35,6 +35,7 @@ authRoute.post("/register", async (c) => {
     .insert({ id: userId, email, password_hash: hash });
 
   if (error) {
+    console.error("Supabase Register Error:", error);
     return c.json({ error: "Database error" }, 500);
   }
 
@@ -53,6 +54,7 @@ authRoute.post("/login", async (c) => {
     .single();
 
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+    console.error("Login Error: Invalid credentials or user not found:", email, !!user);
     return c.json({ error: "Invalid credentials" }, 401);
   }
 
