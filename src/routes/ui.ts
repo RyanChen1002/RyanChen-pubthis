@@ -84,7 +84,7 @@ uiRoute.get("/", async (c) => {
           POST /v1/publish<br>
           Authorization: Bearer pk_your_api_key<br>
           {"content": "# Hello", "content_type": "text/markdown"}<br>
-          <span style="color:#10b981;">→ http://50.19.217.7/a/01JABCDEFG</span>
+          <span style="color:#10b981;">→ https://yourdomain.com/a/01JABCDEFG</span>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin:40px 0;">
           <div style="background:rgba(255,255,255,.6);padding:20px;border-radius:12px;border:1px solid var(--border);">
@@ -183,7 +183,7 @@ uiRoute.get("/dashboard", async (c) => {
 
           <div class="code-block">
             <span style="color:#64748b;"># Example — any language, any model</span><br>
-            curl -X POST http://50.19.217.7/v1/publish \<br>
+            curl -X POST https://yourdomain.com/v1/publish \<br>
             &nbsp;&nbsp;-H "Authorization: Bearer pk_your_key" \<br>
             &nbsp;&nbsp;-H "Content-Type: application/json" \<br>
             &nbsp;&nbsp;-d '{"content":"# Hello","content_type":"text/markdown"}'

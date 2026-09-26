@@ -30,7 +30,7 @@ async function run() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "PUBTHIS_USER": "01M2CDA34RFYRN5PHK1429FTQV" // Your personal ID
+        "PUBTHIS_USER": "YOUR_USER_ID_HERE" // Your personal ID
       },
       body: JSON.stringify({
         content: exampleWebsiteHtml,
