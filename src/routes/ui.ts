@@ -65,7 +65,7 @@ const BaseHTML = (props: { title: string; children: any }) => html`
 `;
 
 uiRoute.get("/", async (c) => {
-  const sessionId = getCookie(c, "session_id");
+  const sessionId = getCookie(c, "sb-auth-token");
   const user = await getUserFromSession(sessionId);
   return c.html(BaseHTML({
     title: "Home",
@@ -120,11 +120,24 @@ uiRoute.get("/login", async (c) => {
         async function submitForm() {
           const email=document.getElementById('email').value, password=document.getElementById('password').value;
           const err=document.getElementById('errorMsg');
+          
+          // First try to login
           let res=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
-          if(res.ok){window.location.href='/dashboard';return;}
+          let json=await res.json();
+          if(res.ok){ window.location.href='/dashboard'; return; }
+          
+          // If login fails, try to register
           let reg=await fetch('/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
-          if(reg.ok){await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});window.location.href='/dashboard';return;}
-          err.innerText='Invalid credentials';err.style.display='block';
+          let regJson=await reg.json();
+          if(reg.ok){
+             err.style.color = '#10b981'; // green
+             err.innerText = regJson.message || 'Please check your email to verify your account.';
+             err.style.display='block';
+             return;
+          }
+          err.style.color = '#ef4444'; // red
+          err.innerText = json.error || regJson.error || 'Invalid credentials';
+          err.style.display='block';
         }
       </script>
     `
@@ -132,7 +145,7 @@ uiRoute.get("/login", async (c) => {
 });
 
 uiRoute.get("/dashboard", async (c) => {
-  const sessionId = getCookie(c, "session_id");
+  const sessionId = getCookie(c, "sb-auth-token");
   const user = await getUserFromSession(sessionId);
   if (!user) return c.redirect("/login");
 
@@ -235,7 +248,7 @@ uiRoute.get("/dashboard", async (c) => {
 });
 
 uiRoute.delete("/api/artifacts/:id", async (c) => {
-  const sessionId = getCookie(c, "session_id");
+  const sessionId = getCookie(c, "sb-auth-token");
   const user = await getUserFromSession(sessionId);
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   const id = c.req.param("id");

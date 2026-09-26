@@ -8,7 +8,7 @@ export const apiKeysRoute = new Hono();
 
 // Get all API keys for logged-in user (names only, not the actual key)
 apiKeysRoute.get("/api/keys", async (c) => {
-  const sessionId = getCookie(c, "session_id");
+  const sessionId = getCookie(c, "sb-auth-token");
   const user = await getUserFromSession(sessionId);
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
@@ -23,7 +23,7 @@ apiKeysRoute.get("/api/keys", async (c) => {
 
 // Generate a new API key
 apiKeysRoute.post("/api/keys", async (c) => {
-  const sessionId = getCookie(c, "session_id");
+  const sessionId = getCookie(c, "sb-auth-token");
   const user = await getUserFromSession(sessionId);
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
@@ -52,7 +52,7 @@ apiKeysRoute.post("/api/keys", async (c) => {
 
 // Delete an API key
 apiKeysRoute.delete("/api/keys/:id", async (c) => {
-  const sessionId = getCookie(c, "session_id");
+  const sessionId = getCookie(c, "sb-auth-token");
   const user = await getUserFromSession(sessionId);
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 

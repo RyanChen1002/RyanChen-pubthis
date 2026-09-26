@@ -1,7 +1,5 @@
 import { Hono } from "hono";
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";
-import bcrypt from "bcryptjs";
-import { ulid } from "ulid";
 import { supabase } from "../supabase.js";
 
 export const authRoute = new Hono();
@@ -15,31 +13,20 @@ authRoute.post("/register", async (c) => {
     return c.json({ error: "Email and password required" }, 400);
   }
 
-  // Check if user already exists
-  const { data: existing } = await supabase
-    .from("users")
-    .select("id")
-    .eq("email", email)
-    .single();
-
-  if (existing) {
-    return c.json({ error: "Email already in use" }, 400);
-  }
-
-  const salt = bcrypt.genSaltSync(10);
-  const hash = bcrypt.hashSync(password, salt);
-  const userId = ulid();
-
-  const { error } = await supabase
-    .from("users")
-    .insert({ id: userId, email, password_hash: hash });
+  // Native Supabase Auth Registration
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+  });
 
   if (error) {
     console.error("Supabase Register Error:", error);
-    return c.json({ error: "Database error" }, 500);
+    return c.json({ error: error.message }, 400);
   }
 
-  return c.json({ success: true, message: "User created" });
+  // Supabase has email confirmations enabled by default in the dashboard
+  // We inform the frontend to tell the user
+  return c.json({ success: true, message: "Registration successful. Please check your email to verify your account before logging in." });
 });
 
 // Login
@@ -47,31 +34,23 @@ authRoute.post("/login", async (c) => {
   const body = await c.req.json();
   const { email, password } = body;
 
-  const { data: user } = await supabase
-    .from("users")
-    .select("*")
-    .eq("email", email)
-    .single();
-
-  if (!user || !bcrypt.compareSync(password, user.password_hash)) {
-    console.error("Login Error: Invalid credentials or user not found:", email, !!user);
-    return c.json({ error: "Invalid credentials" }, 401);
-  }
-
-  const sessionId = ulid();
-  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7); // 7 days
-
-  await supabase.from("sessions").insert({
-    id: sessionId,
-    user_id: user.id,
-    expires_at: expiresAt.toISOString(),
+  // Native Supabase SignIn
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
   });
 
-  setCookie(c, "session_id", sessionId, {
+  if (error || !data.session) {
+    console.error("Supabase Login Error:", error?.message);
+    return c.json({ error: error?.message || "Invalid credentials" }, 401);
+  }
+
+  // Save the JWT access_token to the cookie so the server knows who is logged in
+  setCookie(c, "sb-auth-token", data.session.access_token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "Lax",
-    maxAge: 60 * 60 * 24 * 7,
+    maxAge: 60 * 60 * 24 * 7, // 7 days
     path: "/",
   });
 
@@ -80,35 +59,19 @@ authRoute.post("/login", async (c) => {
 
 // Logout
 authRoute.post("/logout", async (c) => {
-  const sessionId = getCookie(c, "session_id");
-  if (sessionId) {
-    await supabase.from("sessions").delete().eq("id", sessionId);
-    deleteCookie(c, "session_id", { path: "/" });
-  }
+  deleteCookie(c, "sb-auth-token", { path: "/" });
   return c.json({ success: true, message: "Logged out" });
 });
 
-export async function getUserFromSession(sessionId: string | undefined) {
-  if (!sessionId) return null;
+export async function getUserFromSession(token: string | undefined) {
+  if (!token) return null;
 
-  const { data: session } = await supabase
-    .from("sessions")
-    .select("user_id, expires_at")
-    .eq("id", sessionId)
-    .single();
+  // Native Supabase User extraction from JWT token
+  const { data: { user }, error } = await supabase.auth.getUser(token);
 
-  if (!session) return null;
-
-  if (new Date(session.expires_at) < new Date()) {
-    await supabase.from("sessions").delete().eq("id", sessionId);
+  if (error || !user) {
     return null;
   }
-
-  const { data: user } = await supabase
-    .from("users")
-    .select("id, email")
-    .eq("id", session.user_id)
-    .single();
 
   return user;
 }
