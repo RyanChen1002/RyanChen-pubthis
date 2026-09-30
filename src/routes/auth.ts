@@ -24,8 +24,6 @@ authRoute.post("/register", async (c) => {
     return c.json({ error: error.message }, 400);
   }
 
-  // Supabase has email confirmations enabled by default in the dashboard
-  // We inform the frontend to tell the user
   return c.json({ success: true, message: "Registration successful. Please check your email to verify your account before logging in." });
 });
 
@@ -45,12 +43,22 @@ authRoute.post("/login", async (c) => {
     return c.json({ error: error?.message || "Invalid credentials" }, 401);
   }
 
-  // Save the JWT access_token to the cookie so the server knows who is logged in
-  setCookie(c, "sb-auth-token", data.session.access_token, {
+  // Save BOTH access_token and refresh_token
+  // access_token expires in 1hr, but refresh_token lasts 60 days
+  // We use refresh_token to silently renew sessions
+  setCookie(c, "sb-access-token", data.session.access_token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: false,
     sameSite: "Lax",
-    maxAge: 60 * 60 * 24 * 30, // 30 days
+    maxAge: 60 * 60 * 24 * 60, // 60 days cookie
+    path: "/",
+  });
+
+  setCookie(c, "sb-refresh-token", data.session.refresh_token, {
+    httpOnly: true,
+    secure: false,
+    sameSite: "Lax",
+    maxAge: 60 * 60 * 24 * 60, // 60 days cookie
     path: "/",
   });
 
@@ -59,19 +67,29 @@ authRoute.post("/login", async (c) => {
 
 // Logout
 authRoute.post("/logout", async (c) => {
+  deleteCookie(c, "sb-access-token", { path: "/" });
+  deleteCookie(c, "sb-refresh-token", { path: "/" });
+  // Also clear old cookie name in case it lingers
   deleteCookie(c, "sb-auth-token", { path: "/" });
   return c.json({ success: true, message: "Logged out" });
 });
 
-export async function getUserFromSession(token: string | undefined) {
-  if (!token) return null;
+export async function getUserFromSession(accessToken: string | undefined, refreshToken?: string | undefined) {
+  if (!accessToken && !refreshToken) return null;
 
-  // Native Supabase User extraction from JWT token
-  const { data: { user }, error } = await supabase.auth.getUser(token);
-
-  if (error || !user) {
-    return null;
+  // First try the access token directly
+  if (accessToken) {
+    const { data: { user }, error } = await supabase.auth.getUser(accessToken);
+    if (!error && user) return user;
   }
 
-  return user;
+  // If access token expired, use refresh token to get a new session
+  if (refreshToken) {
+    const { data, error } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
+    if (!error && data.user) {
+      return { ...data.user, _newAccessToken: data.session?.access_token, _newRefreshToken: data.session?.refresh_token };
+    }
+  }
+
+  return null;
 }

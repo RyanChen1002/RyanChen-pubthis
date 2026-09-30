@@ -2,9 +2,30 @@ import { html } from "hono/html";
 import { Hono } from "hono";
 import { getUserFromSession } from "./auth.js";
 import { supabase } from "../supabase.js";
-import { getCookie } from "hono/cookie";
+import { getCookie, setCookie } from "hono/cookie";
 
 export const uiRoute = new Hono();
+
+// Helper: get user from cookies, auto-refresh if access token expired
+async function getAuthUser(c: any) {
+  const accessToken = getCookie(c, "sb-access-token");
+  const refreshToken = getCookie(c, "sb-refresh-token");
+  const user = await getUserFromSession(accessToken, refreshToken);
+  if (!user) return null;
+
+  // If tokens were refreshed, update the cookies automatically
+  if ((user as any)._newAccessToken) {
+    setCookie(c, "sb-access-token", (user as any)._newAccessToken, {
+      httpOnly: true, secure: false, sameSite: "Lax",
+      maxAge: 60 * 60 * 24 * 60, path: "/",
+    });
+    setCookie(c, "sb-refresh-token", (user as any)._newRefreshToken, {
+      httpOnly: true, secure: false, sameSite: "Lax",
+      maxAge: 60 * 60 * 24 * 60, path: "/",
+    });
+  }
+  return user;
+}
 
 const BaseHTML = (props: { title: string; children: any }) => html`
   <!DOCTYPE html>
@@ -65,8 +86,7 @@ const BaseHTML = (props: { title: string; children: any }) => html`
 `;
 
 uiRoute.get("/", async (c) => {
-  const sessionId = getCookie(c, "sb-auth-token");
-  const user = await getUserFromSession(sessionId);
+  const user = await getAuthUser(c);
   return c.html(BaseHTML({
     title: "Home",
     children: html`
@@ -145,8 +165,7 @@ uiRoute.get("/login", async (c) => {
 });
 
 uiRoute.get("/dashboard", async (c) => {
-  const sessionId = getCookie(c, "sb-auth-token");
-  const user = await getUserFromSession(sessionId);
+  const user = await getAuthUser(c);
   if (!user) return c.redirect("/login");
 
   const { data: artifacts } = await supabase.from("artifacts").select("id,content_type,created_at").eq("user_id", user.id).order("created_at", { ascending: false });
@@ -269,8 +288,7 @@ uiRoute.get("/dashboard", async (c) => {
 });
 
 uiRoute.delete("/api/artifacts/:id", async (c) => {
-  const sessionId = getCookie(c, "sb-auth-token");
-  const user = await getUserFromSession(sessionId);
+  const user = await getAuthUser(c);
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   const id = c.req.param("id");
   await supabase.from("artifacts").delete().eq("id", id).eq("user_id", user.id);

@@ -1,15 +1,34 @@
 import { Hono } from "hono";
 import { ulid } from "ulid";
 import { supabase } from "../supabase.js";
-import { getCookie } from "hono/cookie";
+import { getCookie, setCookie } from "hono/cookie";
 import { getUserFromSession } from "./auth.js";
 
 export const apiKeysRoute = new Hono();
 
-// Get all API keys for logged-in user (names only, not the actual key)
+// Helper: get user from cookies, auto-refresh if access token expired
+async function getAuthUser(c: any) {
+  const accessToken = getCookie(c, "sb-access-token");
+  const refreshToken = getCookie(c, "sb-refresh-token");
+  const user = await getUserFromSession(accessToken, refreshToken);
+  if (!user) return null;
+
+  if ((user as any)._newAccessToken) {
+    setCookie(c, "sb-access-token", (user as any)._newAccessToken, {
+      httpOnly: true, secure: false, sameSite: "Lax",
+      maxAge: 60 * 60 * 24 * 60, path: "/",
+    });
+    setCookie(c, "sb-refresh-token", (user as any)._newRefreshToken, {
+      httpOnly: true, secure: false, sameSite: "Lax",
+      maxAge: 60 * 60 * 24 * 60, path: "/",
+    });
+  }
+  return user;
+}
+
+// Get all API keys for logged-in user
 apiKeysRoute.get("/api/keys", async (c) => {
-  const sessionId = getCookie(c, "sb-auth-token");
-  const user = await getUserFromSession(sessionId);
+  const user = await getAuthUser(c);
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
   const { data: keys } = await supabase
@@ -23,14 +42,12 @@ apiKeysRoute.get("/api/keys", async (c) => {
 
 // Generate a new API key
 apiKeysRoute.post("/api/keys", async (c) => {
-  const sessionId = getCookie(c, "sb-auth-token");
-  const user = await getUserFromSession(sessionId);
+  const user = await getAuthUser(c);
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
   const body = await c.req.json().catch(() => ({}));
   const name = body.name || "New Key";
 
-  // Generate a random API key: pk_ + 32 random chars
   const randomBytes = Array.from(crypto.getRandomValues(new Uint8Array(24)))
     .map(b => b.toString(16).padStart(2, "0"))
     .join("");
@@ -49,14 +66,12 @@ apiKeysRoute.post("/api/keys", async (c) => {
     return c.json({ error: "Failed to create key" }, 500);
   }
 
-  // Return the full key ONCE — user must save it
   return c.json({ id: keyId, key: apiKey, name }, 201);
 });
 
 // Delete an API key
 apiKeysRoute.delete("/api/keys/:id", async (c) => {
-  const sessionId = getCookie(c, "sb-auth-token");
-  const user = await getUserFromSession(sessionId);
+  const user = await getAuthUser(c);
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
   const id = c.req.param("id");
@@ -76,7 +91,6 @@ export async function getUserFromApiKey(key: string | null | undefined) {
 
   if (!apiKey) return null;
 
-  // Update last_used_at
   await supabase
     .from("api_keys")
     .update({ last_used_at: new Date().toISOString() })
