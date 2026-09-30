@@ -44,7 +44,10 @@ apiKeysRoute.post("/api/keys", async (c) => {
     name,
   });
 
-  if (error) return c.json({ error: "Failed to create key" }, 500);
+  if (error) {
+    console.error("API Key Create Error:", error);
+    return c.json({ error: "Failed to create key" }, 500);
+  }
 
   // Return the full key ONCE — user must save it
   return c.json({ id: keyId, key: apiKey, name }, 201);
