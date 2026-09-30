@@ -231,7 +231,28 @@ uiRoute.get("/dashboard", async (c) => {
           const d=await res.json();
           if(d.key){document.getElementById('newKeyValue').textContent=d.key;document.getElementById('newKeyDisplay').style.display='block';setTimeout(()=>location.reload(),5000);}
         }
-        function copyKey(){navigator.clipboard.writeText(document.getElementById('newKeyValue').textContent).then(()=>alert('Copied!'));}
+        function copyKey(){
+          const text = document.getElementById('newKeyValue').textContent;
+          if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(text).then(()=>alert('Copied!'));
+          } else {
+            // Fallback for non-HTTPS (like direct IP addresses)
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-999999px";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+              document.execCommand('copy');
+              alert('Copied!');
+            } catch (err) {
+              alert('Failed to copy. Please manually select the text and hit Ctrl+C.');
+            }
+            document.body.removeChild(textArea);
+          }
+        }
         async function revokeKey(id){
           if(!confirm("Revoke this key?"))return;
           const res=await fetch('/api/keys/'+id,{method:'DELETE'});
